@@ -1,4 +1,4 @@
-# aoc2018
+# avent of code 2018
 aoc 2018 - in rust!
 
 ### files
