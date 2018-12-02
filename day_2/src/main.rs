@@ -14,19 +14,12 @@ fn main() {
             *freq.entry(c).or_insert(0) += 1;
         }
 
-        let mut two = false;
-        let mut three = false;
+        if freq.values().any(|v| *v == 2) {
+        	count_2 += 1;
+        }
 
-        for v in freq.values() {
-            if *v == 2 && !two {
-                count_2 += 1;
-                two = true;
-            }
-
-            if *v == 3 && !three {
-                count_3 += 1;
-                three = true;
-            }
+        if freq.values().any(|v| *v == 3) {
+        	count_3 += 1;
         }
     }
 
