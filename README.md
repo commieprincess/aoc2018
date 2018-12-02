@@ -6,4 +6,6 @@ aoc 2018 - in rust!
 - template.rs : a simple main.rs template for aoc, with imports collections stuff and ordering
 
 ### leaderboard positions
-- **day 1:** 18 (both stars); 54 (first only)
+  |day|both stars|first star|
+  |---|----------|----------|
+  |  1|        18|        54|
