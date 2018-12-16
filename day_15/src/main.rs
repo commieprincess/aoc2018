@@ -35,7 +35,7 @@ fn game_p2(input: &'static str) -> u64 {
     let mut pool: Vec<JoinHandle<Option<(u64, u64)>>> = Vec::new();
     let counter = Arc::new(Mutex::new(Some(4)));
 
-    for _ in 0..12 {
+    for _ in 0..num_cpus::get() {
         let counter_handle = Arc::clone(&counter);
         let grid = Arc::clone(&grid);
 
@@ -44,7 +44,6 @@ fn game_p2(input: &'static str) -> u64 {
 
             let ap = (*lock)?;
             *lock.as_mut().unwrap() += 1;
-
             std::mem::drop(lock);
 
             let mut fighters = get_fighters(input, ap);

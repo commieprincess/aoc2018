@@ -5,3 +5,4 @@ authors = ["commieprincess <34149625+commieprincess@users.noreply.github.com>"]
 edition = "2018"
 
 [dependencies]
+num_cpus = "1.9"
