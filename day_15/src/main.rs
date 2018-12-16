@@ -18,88 +18,46 @@ fn main() {
 
 fn game(input: &str) -> u64 {
     let grid: Grid = str::parse(input).unwrap();
-    let mut fighters = Vec::new();
-
-    for (y, l) in input.lines().enumerate() {
-        for (x, c) in l.chars().enumerate() {
-            match c {
-                'G' => fighters.push(Fighter::new((x, y), FighterType::Goblin, 3)),
-                'E' => fighters.push(Fighter::new((x, y), FighterType::Elf, 3)),
-                _ => {}
-            }
-        }
-    }
+    let mut fighters = get_fighters(input, 3);
 
     let mut counter = 0;
 
-    while game_round(&grid, &mut fighters) {
+    while game_round(&grid, &mut fighters) == GameResult::Next {
         counter += 1;
-        // println!("after {} rounds", counter + 1);
-
-        // fighters.sort();
-
-        // grid.print(&fighters);
     }
 
     counter * fighters.iter().map(|f| f.hp()).sum::<u64>()
 }
 
 fn game_p2(input: &'static str) -> u64 {
-    let grid: Grid = str::parse(input).unwrap();
+    let grid: Arc<Grid> = Arc::new(str::parse(input).unwrap());
 
     let mut pool: Vec<JoinHandle<Option<(u64, u64)>>> = Vec::new();
     let counter = Arc::new(Mutex::new(Some(4)));
 
     for _ in 0..12 {
-        let arc = Arc::clone(&counter);
-        let grid = grid.clone();
+        let counter_handle = Arc::clone(&counter);
+        let grid = Arc::clone(&grid);
 
-        pool.push(std::thread::spawn(move || {
-            let counter_handle = arc;
+        pool.push(std::thread::spawn(move || 'ap_loop: loop {
+            let mut lock = counter_handle.lock().unwrap();
 
-            'ap_loop: loop {
-                let mut lock = counter_handle.lock().unwrap();
+            let ap = (*lock)?;
+            *lock.as_mut().unwrap() += 1;
 
-                let ap = match *lock {
-                    Some(v) => {
-                        *lock.as_mut().unwrap() += 1;
-                        v
+            std::mem::drop(lock);
+
+            let mut fighters = get_fighters(input, ap);
+
+            for counter in 0.. {
+                match game_round_p2(&grid, &mut fighters) {
+                    GameResult::Failed => continue 'ap_loop,
+                    GameResult::Next => continue,
+                    GameResult::Done => {
+                        *counter_handle.lock().unwrap() = None;
+                        return Some((ap, counter * fighters.iter().map(|f| f.hp()).sum::<u64>()));
                     }
-                    None => return None,
                 };
-
-                std::mem::drop(lock);
-
-                let mut fighters = Vec::new();
-
-                for (y, l) in input.lines().enumerate() {
-                    for (x, c) in l.chars().enumerate() {
-                        match c {
-                            'G' => fighters.push(Fighter::new((x, y), FighterType::Goblin, 3)),
-                            'E' => fighters.push(Fighter::new((x, y), FighterType::Elf, ap)),
-                            _ => {}
-                        }
-                    }
-                }
-
-                let mut counter = 0;
-
-                loop {
-                    match game_round_p2(&grid, &mut fighters) {
-                        GameResult::Failed => continue 'ap_loop,
-                        GameResult::Next => {
-                            counter += 1;
-                            continue;
-                        }
-                        GameResult::Done => {
-                            *counter_handle.lock().unwrap() = None;
-                            return Some((
-                                ap,
-                                counter * fighters.iter().map(|f| f.hp()).sum::<u64>(),
-                            ));
-                        }
-                    };
-                }
             }
         }));
     }
@@ -115,6 +73,23 @@ fn game_p2(input: &'static str) -> u64 {
     values[0].1
 }
 
+fn get_fighters(input: &str, elf_ap: u64) -> Vec<Fighter> {
+    let mut fighters = Vec::new();
+
+    for (y, l) in input.lines().enumerate() {
+        for (x, c) in l.chars().enumerate() {
+            match c {
+                'G' => fighters.push(Fighter::new((x, y), FighterType::Goblin, 3)),
+                'E' => fighters.push(Fighter::new((x, y), FighterType::Elf, elf_ap)),
+                _ => {}
+            }
+        }
+    }
+
+    fighters
+}
+
+#[derive(PartialEq)]
 enum GameResult {
     Failed,
     Next,
@@ -132,96 +107,19 @@ fn game_round_p2(grid: &Grid, fighters: &mut [Fighter]) -> GameResult {
             };
         }
 
-        let enemies = fighters[i].find_enemies(fighters);
-
-        if fighters[i].fighter_type == FighterType::Elf && enemies.is_empty() {
+        if fighters[i].fighter_type == FighterType::Elf
+            && fighters[i].find_enemies(fighters).is_empty()
+        {
             return GameResult::Done;
         }
 
-        if fighters[i].find_attack_target(&fighters).is_none() {
-            let reachable = fighters[i].reachable_squares(&grid, fighters);
-            let mut potential_targets_in_order = vec![vec![]; 4];
-            let mut potential_targets = Vec::new();
-
-            for e in &enemies {
-                let in_range = e.in_range(&grid, &fighters);
-
-                for (i, s) in in_range.iter().enumerate() {
-                    if reachable.contains(&s) {
-                        potential_targets_in_order[i].push(s.clone());
-                    }
-                }
-            }
-
-            for vec in &potential_targets_in_order {
-                for val in vec {
-                    potential_targets.push(*val);
-                }
-            }
-
-            if !potential_targets.is_empty() {
-                let closest_target_distance = potential_targets
-                    .iter()
-                    .map(|v| {
-                        shortest_path_between(fighters[i].pos, *v, &grid, &fighters)
-                            .and_then(|v| Some(v.len()))
-                            .unwrap_or(999_999_999)
-                    })
-                    .min()
-                    .unwrap();
-
-                potential_targets = potential_targets
-                    .iter()
-                    .map(|t| {
-                        (
-                            t,
-                            shortest_path_between(fighters[i].pos, *t, &grid, &fighters)
-                                .and_then(|v| Some(v.len()))
-                                .unwrap_or(999_999_999),
-                        )
-                    })
-                    .filter(|t| t.1 == closest_target_distance)
-                    .map(|t| *t.0)
-                    .collect();
-
-                let mut moves: Vec<(Location, usize)> = Vec::new();
-
-                let reading_order = vec![
-                    (fighters[i].pos.0, fighters[i].pos.1 - 1),
-                    (fighters[i].pos.0 - 1, fighters[i].pos.1),
-                    (fighters[i].pos.0 + 1, fighters[i].pos.1),
-                    (fighters[i].pos.0, fighters[i].pos.1 + 1),
-                ];
-
-                for position in reading_order {
-                    if grid.get(position).is_empty()
-                        && !fighters.iter().any(|f| f.pos == position && f.is_alive())
-                    {
-                        moves.push((
-                            position,
-                            shortest_path_between(position, potential_targets[0], &grid, &fighters)
-                                .and_then(|v| Some(v.len()))
-                                .unwrap_or(999_999_999),
-                        ));
-                    }
-                }
-
-                if moves.is_empty() {
-                    continue;
-                }
-
-                let min_len = moves.iter().min_by_key(|v| v.1).unwrap().1;
-                fighters[i].pos = moves.iter().filter(|v| v.1 == min_len).nth(0).unwrap().0;
-            }
-        }
-
-        fighters[i].attack(fighters);
+        do_turn(i, grid, fighters);
     }
 
     GameResult::Next
 }
 
-fn game_round(grid: &Grid, fighters: &mut [Fighter]) -> bool {
+fn game_round(grid: &Grid, fighters: &mut [Fighter]) -> GameResult {
     fighters.sort();
 
     for i in 0..fighters.len() {
@@ -229,92 +127,92 @@ fn game_round(grid: &Grid, fighters: &mut [Fighter]) -> bool {
             continue;
         }
 
-        let enemies = fighters[i].find_enemies(fighters);
-
-        if enemies.is_empty() {
-            return false;
+        if fighters[i].find_enemies(fighters).is_empty() {
+            return GameResult::Done;
         }
 
-        if fighters[i].find_attack_target(&fighters).is_none() {
-            let reachable = fighters[i].reachable_squares(&grid, fighters);
-            let mut potential_targets_in_order = vec![vec![]; 4];
-            let mut potential_targets = Vec::new();
-
-            for e in &enemies {
-                let in_range = e.in_range(&grid, &fighters);
-
-                for (i, s) in in_range.iter().enumerate() {
-                    if reachable.contains(&s) {
-                        potential_targets_in_order[i].push(s.clone());
-                    }
-                }
-            }
-
-            for vec in &potential_targets_in_order {
-                for val in vec {
-                    potential_targets.push(*val);
-                }
-            }
-
-            if !potential_targets.is_empty() {
-                let closest_target_distance = potential_targets
-                    .iter()
-                    .filter_map(|v| {
-                        shortest_path_between(fighters[i].pos, *v, &grid, &fighters)
-                            .and_then(|v| Some(v.len()))
-                    })
-                    .min()
-                    .unwrap();
-
-                potential_targets = potential_targets
-                    .iter()
-                    .filter_map(|t| {
-                        shortest_path_between(fighters[i].pos, *t, &grid, &fighters)
-                            .and_then(|v| Some(v.len()))
-                            .map(|v| (t, v))
-                    })
-                    .filter(|t| t.1 == closest_target_distance)
-                    .map(|t| *t.0)
-                    .collect();
-
-                let mut moves: Vec<(Location, usize)> = Vec::new();
-
-                let reading_order = vec![
-                    (fighters[i].pos.0, fighters[i].pos.1 - 1),
-                    (fighters[i].pos.0 - 1, fighters[i].pos.1),
-                    (fighters[i].pos.0 + 1, fighters[i].pos.1),
-                    (fighters[i].pos.0, fighters[i].pos.1 + 1),
-                ];
-
-                for position in reading_order {
-                    if grid.get(position).is_empty()
-                        && !fighters.iter().any(|f| f.pos == position && f.is_alive())
-                    {
-                        match shortest_path_between(
-                            position,
-                            potential_targets[0],
-                            &grid,
-                            &fighters,
-                        ) {
-                            Some(v) => moves.push((position, v.len())),
-                            None => {}
-                        }
-                    }
-                }
-
-                if moves.is_empty() {
-                    continue;
-                }
-
-                let min_len = moves.iter().min_by_key(|v| v.1).unwrap().1;
-                fighters[i].pos = moves.iter().filter(|v| v.1 == min_len).nth(0).unwrap().0;
-            }
-        }
-
-        fighters[i].attack(fighters);
+        do_turn(i, grid, fighters);
     }
 
-    true
+    GameResult::Next
+}
+
+fn do_turn(i: usize, grid: &Grid, fighters: &mut [Fighter]) {
+    if fighters[i].find_attack_target(&fighters).is_none() {
+        let reachable = fighters[i].reachable_squares(&grid, fighters);
+        let mut potential_targets_in_order = vec![vec![]; 4];
+        let mut potential_targets = Vec::new();
+
+        for e in &fighters[i].find_enemies(&fighters) {
+            let in_range = e.in_range(&grid, &fighters);
+
+            for (i, s) in in_range
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| reachable.contains(s))
+            {
+                if reachable.contains(&s) {
+                    potential_targets_in_order[i].push(s.clone());
+                }
+            }
+        }
+
+        for vec in &mut potential_targets_in_order {
+            potential_targets.append(vec);
+        }
+
+        if !potential_targets.is_empty() {
+            let closest_target_distance = potential_targets
+                .iter()
+                .filter_map(|v| {
+                    shortest_path_between(fighters[i].pos, *v, &grid, &fighters)
+                        .and_then(|v| Some(v.len()))
+                })
+                .min()
+                .unwrap();
+
+            potential_targets = potential_targets
+                .iter()
+                .filter_map(|t| {
+                    shortest_path_between(fighters[i].pos, *t, &grid, &fighters)
+                        .and_then(|v| Some(v.len()))
+                        .map(|v| (t, v))
+                })
+                .filter(|t| t.1 == closest_target_distance)
+                .map(|t| *t.0)
+                .collect();
+
+            let mut moves: Vec<(Location, usize)> = Vec::new();
+
+            let reading_order = [
+                (fighters[i].pos.0, fighters[i].pos.1 - 1),
+                (fighters[i].pos.0 - 1, fighters[i].pos.1),
+                (fighters[i].pos.0 + 1, fighters[i].pos.1),
+                (fighters[i].pos.0, fighters[i].pos.1 + 1),
+            ];
+
+            for position in &reading_order {
+                if grid.get(*position).is_empty()
+                    && !fighters.iter().any(|f| f.pos == *position && f.is_alive())
+                {
+                    if let Some(v) =
+                        shortest_path_between(*position, potential_targets[0], &grid, &fighters)
+                    {
+                        moves.push((*position, v.len()));
+                    }
+                }
+            }
+
+            if moves.is_empty() {
+                return;
+            }
+
+            let min_len = moves.iter().min_by_key(|v| v.1).unwrap().1;
+            fighters[i].pos = moves.iter().filter(|v| v.1 == min_len).nth(0).unwrap().0;
+        }
+    }
+
+    fighters[i].attack(fighters);
 }
 
 fn manhattan_distance(first: Location, other: Location) -> usize {
@@ -366,7 +264,7 @@ impl Fighter {
     fn in_range(&self, grid: &Grid, fighters: &[Fighter]) -> Vec<Location> {
         let mut nodes = Vec::new();
 
-        let reading_order = vec![
+        let reading_order = [
             (self.pos.0, self.pos.1 - 1),
             (self.pos.0 - 1, self.pos.1),
             (self.pos.0 + 1, self.pos.1),
@@ -458,7 +356,7 @@ impl Eq for Fighter {}
 
 fn shortest_path_between(
     self_pos: Location,
-    other: Location,
+    target: Location,
     grid: &Grid,
     fighters: &[Fighter],
 ) -> Option<Vec<Location>> {
@@ -480,38 +378,27 @@ fn shortest_path_between(
     let mut current = self_pos;
 
     loop {
-        let neighbors = vec![
+        let neighbors = [
             (current.0, current.1 - 1),
             (current.0 - 1, current.1),
             (current.0 + 1, current.1),
             (current.0, current.1 + 1),
         ];
 
-        let bounds_checks = vec![
-            current.1 > 0,
-            current.0 > 0,
-            current.0 < grid.inner[current.1].len() - 1,
-            current.1 < grid.inner.len() - 1,
-        ];
-
         let current_node_value = vertex_set[&current].unwrap();
 
-        for (p, t) in neighbors.iter().zip(&bounds_checks) {
-            if *t && vertex_set.contains_key(p) {
-                let neighbor_value = vertex_set[p];
-
+        for p in neighbors.iter() {
+            if let Some(neighbor_value) = vertex_set.get(p) {
                 if neighbor_value.is_none() || neighbor_value.unwrap().0 > current_node_value.0 + 1
                 {
-                    vertex_set
-                        .insert(*p, Some((current_node_value.0 + 1, Some(current))))
-                        .unwrap();
+                    vertex_set.insert(*p, Some((current_node_value.0 + 1, Some(current))));
                 }
             }
         }
 
         visited.insert(current, vertex_set.remove(&current).unwrap());
 
-        if current == other {
+        if current == target {
             break;
         }
 
@@ -522,8 +409,7 @@ fn shortest_path_between(
             .0;
     }
 
-    let mut current = other;
-
+    let mut current = target;
     let mut path = Vec::new();
 
     while current != self_pos {
