@@ -72,7 +72,10 @@ fn main() {
 
     println!(
         "part 1: {}",
-        potential_opcodes_for_samples.iter().filter(|v| v.len() >= 3).count()
+        potential_opcodes_for_samples
+            .iter()
+            .filter(|v| v.len() >= 3)
+            .count()
     );
 
     let mut actual_opcodes: Vec<Option<u32>> = vec![None; 16];
